@@ -1,0 +1,377 @@
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local fulbright = false
+local originalBrightness = Lighting.Brightness
+local noclip = false
+local speedBoost = false
+local customSpeed = 16 -- Default walk speed
+local scriptRunning = true
+local isUnlocked = false
+
+-- Fly variables
+local flyEnabled = false
+local flyStunned = false
+local flyStunDuration = 2 -- seconds
+local flyStunTimer = 0
+local moveKeys = {W=false, A=false, S=false, D=false, Space=false, LeftControl=false}
+
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+-- Key Entry Frame (starts visible)
+local KeyFrame = Instance.new("Frame")
+KeyFrame.Size = UDim2.new(0, 400, 0, 150)
+KeyFrame.Position = UDim2.new(0.5, -200, 0.4, 0)
+KeyFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+KeyFrame.BorderSizePixel = 2
+KeyFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
+KeyFrame.Parent = ScreenGui
+
+local KeyLabel = Instance.new("TextLabel")
+KeyLabel.Size = UDim2.new(1, -20, 0, 50)
+KeyLabel.Position = UDim2.new(0, 10, 0, 10)
+KeyLabel.Text = "Enter Key to Unlock Menu:"
+KeyLabel.TextColor3 = Color3.new(1, 1, 1)
+KeyLabel.BackgroundTransparency = 1
+KeyLabel.Font = Enum.Font.SourceSansBold
+KeyLabel.TextScaled = true
+KeyLabel.Parent = KeyFrame
+
+local KeyBox = Instance.new("TextBox")
+KeyBox.Size = UDim2.new(1, -20, 0, 40)
+KeyBox.Position = UDim2.new(0, 10, 0, 70)
+KeyBox.PlaceholderText = "Type key here..."
+KeyBox.ClearTextOnFocus = false
+KeyBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+KeyBox.TextColor3 = Color3.new(1, 1, 1)
+KeyBox.Parent = KeyFrame
+KeyBox.Text = ""
+
+local UnlockButton = Instance.new("TextButton")
+UnlockButton.Size = UDim2.new(0, 120, 0, 30)
+UnlockButton.Position = UDim2.new(0.5, -60, 1, -40)
+UnlockButton.Text = "Unlock"
+UnlockButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+UnlockButton.TextColor3 = Color3.new(1, 1, 1)
+UnlockButton.Parent = KeyFrame
+
+-- Full Menu Frame (starts hidden)
+local MenuFrame = Instance.new("Frame")
+MenuFrame.Size = UDim2.new(0, 800, 0, 280)
+MenuFrame.Position = UDim2.new(0.5, -400, 0.3, 0)
+MenuFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+MenuFrame.BorderSizePixel = 2
+MenuFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
+MenuFrame.Visible = false
+MenuFrame.Parent = ScreenGui
+
+local function makeButton(text, posX, posY)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 140, 0, 40)
+    btn.Position = UDim2.new(0, posX, 0, posY)
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(80, 80, 80)
+    btn.Parent = MenuFrame
+    btn.AutoButtonColor = false -- We'll control appearance on disable
+    return btn
+end
+
+-- Close button (kills script)
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -35, 0, 5)
+CloseButton.Text = "X"
+CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseButton.TextColor3 = Color3.new(1, 1, 1)
+CloseButton.BorderSizePixel = 1
+CloseButton.BorderColor3 = Color3.fromRGB(150, 40, 40)
+CloseButton.Parent = MenuFrame
+
+-- Top Icon (for reopening menu)
+local TopIcon = Instance.new("TextButton")
+TopIcon.Size = UDim2.new(0, 80, 0, 40)
+TopIcon.Position = UDim2.new(0, 10, 0, 10)
+TopIcon.Text = "Menu"
+TopIcon.BackgroundColor3 = Color3.fromRGB(50, 50, 200)
+TopIcon.TextColor3 = Color3.new(1, 1, 1)
+TopIcon.BorderSizePixel = 1
+TopIcon.BorderColor3 = Color3.fromRGB(70, 70, 220)
+TopIcon.Visible = false
+TopIcon.Parent = ScreenGui
+
+-- Minimize button
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -70, 0, 5)
+MinimizeButton.Text = "_"
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+MinimizeButton.TextColor3 = Color3.new(1, 1, 1)
+MinimizeButton.BorderSizePixel = 1
+MinimizeButton.BorderColor3 = Color3.fromRGB(120, 120, 120)
+MinimizeButton.Parent = MenuFrame
+
+-- Fulbright Button
+local FulbrightButton = makeButton("Fulbright: OFF", 490, 40)
+FulbrightButton.MouseButton1Click:Connect(function()
+    if not scriptRunning or not isUnlocked then return end
+    fulbright = not fulbright
+    if fulbright then
+        Lighting.Brightness = 16
+        FulbrightButton.Text = "Fulbright: ON"
+    else
+        Lighting.Brightness = originalBrightness
+        FulbrightButton.Text = "Fulbright: OFF"
+    end
+end)
+
+-- Noclip Button
+local NoclipButton = makeButton("Noclip: OFF", 10, 40)
+-- Speed Button
+local SpeedButton = makeButton("Speed: OFF", 170, 40)
+-- Fly Button
+local FlyButton = makeButton("Fly: OFF", 330, 40)
+
+-- Speed input box
+local function makeLabelBox(labelText, defaultVal, posX, posY, callback)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 140, 0, 20)
+    label.Position = UDim2.new(0, posX, 0, posY)
+    label.Text = labelText
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.BackgroundTransparency = 1
+    label.Parent = MenuFrame
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(0, 140, 0, 30)
+    box.Position = UDim2.new(0, posX, 0, posY + 20)
+    box.Text = tostring(defaultVal)
+    box.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    box.TextColor3 = Color3.new(1, 1, 1)
+    box.BorderSizePixel = 1
+    box.BorderColor3 = Color3.fromRGB(100, 100, 100)
+    box.ClearTextOnFocus = false
+    box.Parent = MenuFrame
+
+    box.FocusLost:Connect(function()
+        if not scriptRunning then return end
+        local val = tonumber(box.Text)
+        if val and val > 0 then
+            callback(val)
+        else
+            box.Text = tostring(defaultVal)
+        end
+    end)
+end
+
+makeLabelBox("My Speed", customSpeed, 330, 40, function(val)
+    customSpeed = val
+    if speedBoost and player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = customSpeed
+        end
+    end
+end)
+
+-- Disable or enable all buttons (except Close and Minimize) based on lock status
+local function setButtonsEnabled(enabled)
+    FulbrightButton.AutoButtonColor = enabled
+    FulbrightButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
+    FulbrightButton.Active = enabled
+
+    NoclipButton.AutoButtonColor = enabled
+    SpeedButton.AutoButtonColor = enabled
+    FlyButton.AutoButtonColor = enabled
+
+    NoclipButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
+    SpeedButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
+    FlyButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
+
+    NoclipButton.Active = enabled
+    SpeedButton.Active = enabled
+    FlyButton.Active = enabled
+end
+
+-- Start disabled
+setButtonsEnabled(false)
+MenuFrame.Visible = false
+
+-- Unlock function
+local function unlockMenu()
+    local enteredKey = KeyBox.Text
+    if enteredKey:lower() == "chloe bayot" then
+        isUnlocked = true
+        KeyFrame.Visible = false
+        MenuFrame.Visible = true
+        setButtonsEnabled(true)
+    else
+        -- Optional: give feedback for wrong key
+        KeyBox.Text = ""
+        KeyBox.PlaceholderText = "Wrong Key! Try again..."
+    end
+end
+
+UnlockButton.MouseButton1Click:Connect(unlockMenu)
+
+-- Close button functionality
+CloseButton.MouseButton1Click:Connect(function()
+    if fulbright then
+        Lighting.Brightness = originalBrightness
+    end
+    scriptRunning = false
+    ScreenGui:Destroy()
+    script:Destroy()
+end)
+
+-- Toggle menu visibility (only if unlocked)
+TopIcon.MouseButton1Click:Connect(function()
+    if not isUnlocked then return end
+    MenuFrame.Visible = true
+    TopIcon.Visible = false
+end)
+
+MinimizeButton.MouseButton1Click:Connect(function()
+    if not isUnlocked then return end
+    MenuFrame.Visible = false
+    TopIcon.Visible = true
+end)
+
+-- Noclip toggle
+NoclipButton.MouseButton1Click:Connect(function()
+    if not scriptRunning or not isUnlocked then return end
+    noclip = not noclip
+    NoclipButton.Text = noclip and "Noclip: ON" or "Noclip: OFF"
+end)
+
+-- Speed toggle
+SpeedButton.MouseButton1Click:Connect(function()
+    if not scriptRunning or not isUnlocked then return end
+    speedBoost = not speedBoost
+    SpeedButton.Text = speedBoost and "Speed: ON" or "Speed: OFF"
+    if not speedBoost and player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 16 -- Default Roblox walk speed
+        end
+    end
+end)
+
+-- Fly toggle
+FlyButton.MouseButton1Click:Connect(function()
+    if not scriptRunning or not isUnlocked then return end
+    flyEnabled = not flyEnabled
+    if flyEnabled then
+        FlyButton.Text = "Fly: ON"
+    else
+        FlyButton.Text = "Fly: OFF"
+        if player.Character then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.PlatformStand = false
+            end
+        end
+    end
+end)
+
+-- Input detection for movement keys (needed for fly)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = true end
+    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = true end
+    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = true end
+    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = true end
+    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = true end
+    if input.KeyCode == Enum.KeyCode.LeftControl then moveKeys.LeftControl = true end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = false end
+    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = false end
+    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = false end
+    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = false end
+    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = false end
+    if input.KeyCode == Enum.KeyCode.LeftControl then moveKeys.LeftControl = false end
+end)
+
+-- Main loop to apply noclip, speed and fly
+RunService.Stepped:Connect(function(dt)
+    if not scriptRunning then return end
+    if player.Character then
+        -- Noclip
+        for _, part in ipairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = not noclip
+            end
+        end
+
+        -- Speed boost
+        if speedBoost then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = customSpeed
+            end
+        end
+
+        -- Fly control
+        if flyEnabled and not flyStunned then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            if humanoid and rootPart then
+                humanoid.PlatformStand = true
+                local camCFrame = workspace.CurrentCamera.CFrame
+                local moveDirection = Vector3.new(0,0,0)
+                if moveKeys.W then moveDirection = moveDirection + camCFrame.LookVector end
+                if moveKeys.S then moveDirection = moveDirection - camCFrame.LookVector end
+                if moveKeys.A then moveDirection = moveDirection - camCFrame.RightVector end
+                if moveKeys.D then moveDirection = moveDirection + camCFrame.RightVector end
+                if moveKeys.Space then moveDirection = moveDirection + Vector3.new(0,1,0) end
+                if moveKeys.LeftControl then moveDirection = moveDirection - Vector3.new(0,1,0) end
+
+                if moveDirection.Magnitude > 0 then
+                    moveDirection = moveDirection.Unit * customSpeed
+                    rootPart.Velocity = moveDirection
+                else
+                    rootPart.Velocity = Vector3.new(0,0,0)
+                end
+
+                flyStunTimer = flyStunTimer + dt
+                if flyStunTimer >= 5 then
+                    flyStunTimer = 0
+                    if math.random() < 0.2 then -- 20% chance to get stunned every 5 seconds
+                        flyStunned = true
+                        rootPart.Velocity = Vector3.new(0,0,0)
+                        humanoid.PlatformStand = true
+                        FlyButton.Text = "Fly: STUNNED"
+                        delay(flyStunDuration, function()
+                            flyStunned = false
+                            FlyButton.Text = "Fly: ON"
+                        end)
+                    end
+                end
+            end
+        elseif flyEnabled and flyStunned then
+            local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                rootPart.Velocity = Vector3.new(0,0,0)
+            end
+        else
+            if player.Character then
+                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    humanoid.PlatformStand = false
+                end
+            end
+        end
+    end
+end)
