@@ -1,377 +1,292 @@
+-- Player Targeting Hitbox Script (Respawn Safe)
 local Players = game:GetService("Players")
-local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
 
-local player = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+-- Configuration
+local HITBOX_SIZE = Vector3.new(13, 13, 13)
+local HITBOX_COLOR = Color3.new(1, 0, 0)
+local HITBOX_TRANSPARENCY = 0.5
+local DAMAGE_AMOUNT = 50
 
-local fulbright = false
-local originalBrightness = Lighting.Brightness
-local noclip = false
-local speedBoost = false
-local customSpeed = 16 -- Default walk speed
-local scriptRunning = true
-local isUnlocked = false
+-- Create the hitbox
+local function createHitbox(position)
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "PlayerHitbox"
+    hitbox.Size = HITBOX_SIZE
+    hitbox.Position = position
+    hitbox.Color = HITBOX_COLOR
+    hitbox.Transparency = HITBOX_TRANSPARENCY
+    hitbox.Material = Enum.Material.ForceField
+    hitbox.CanCollide = false
+    hitbox.Anchored = true
+    hitbox.Shape = Enum.PartType.Block
 
--- Fly variables
-local flyEnabled = false
-local flyStunned = false
-local flyStunDuration = 2 -- seconds
-local flyStunTimer = 0
-local moveKeys = {W=false, A=false, S=false, D=false, Space=false, LeftControl=false}
+    -- Visual highlight
+    local selectionBox = Instance.new("SelectionBox")
+    selectionBox.Parent = hitbox
+    selectionBox.Adornee = hitbox
+    selectionBox.Color3 = HITBOX_COLOR
+    selectionBox.LineThickness = 0.2
+    selectionBox.Transparency = 0.3
 
--- GUI Setup
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = player:WaitForChild("PlayerGui")
-ScreenGui.ResetOnSpawn = false
+    local pointLight = Instance.new("PointLight")
+    pointLight.Parent = hitbox
+    pointLight.Color = HITBOX_COLOR
+    pointLight.Brightness = 2
+    pointLight.Range = 20
 
--- Key Entry Frame (starts visible)
-local KeyFrame = Instance.new("Frame")
-KeyFrame.Size = UDim2.new(0, 400, 0, 150)
-KeyFrame.Position = UDim2.new(0.5, -200, 0.4, 0)
-KeyFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-KeyFrame.BorderSizePixel = 2
-KeyFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
-KeyFrame.Parent = ScreenGui
-
-local KeyLabel = Instance.new("TextLabel")
-KeyLabel.Size = UDim2.new(1, -20, 0, 50)
-KeyLabel.Position = UDim2.new(0, 10, 0, 10)
-KeyLabel.Text = "Enter Key to Unlock Menu:"
-KeyLabel.TextColor3 = Color3.new(1, 1, 1)
-KeyLabel.BackgroundTransparency = 1
-KeyLabel.Font = Enum.Font.SourceSansBold
-KeyLabel.TextScaled = true
-KeyLabel.Parent = KeyFrame
-
-local KeyBox = Instance.new("TextBox")
-KeyBox.Size = UDim2.new(1, -20, 0, 40)
-KeyBox.Position = UDim2.new(0, 10, 0, 70)
-KeyBox.PlaceholderText = "Type key here..."
-KeyBox.ClearTextOnFocus = false
-KeyBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-KeyBox.TextColor3 = Color3.new(1, 1, 1)
-KeyBox.Parent = KeyFrame
-KeyBox.Text = ""
-
-local UnlockButton = Instance.new("TextButton")
-UnlockButton.Size = UDim2.new(0, 120, 0, 30)
-UnlockButton.Position = UDim2.new(0.5, -60, 1, -40)
-UnlockButton.Text = "Unlock"
-UnlockButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-UnlockButton.TextColor3 = Color3.new(1, 1, 1)
-UnlockButton.Parent = KeyFrame
-
--- Full Menu Frame (starts hidden)
-local MenuFrame = Instance.new("Frame")
-MenuFrame.Size = UDim2.new(0, 800, 0, 280)
-MenuFrame.Position = UDim2.new(0.5, -400, 0.3, 0)
-MenuFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-MenuFrame.BorderSizePixel = 2
-MenuFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
-MenuFrame.Visible = false
-MenuFrame.Parent = ScreenGui
-
-local function makeButton(text, posX, posY)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 140, 0, 40)
-    btn.Position = UDim2.new(0, posX, 0, posY)
-    btn.Text = text
-    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.BorderSizePixel = 1
-    btn.BorderColor3 = Color3.fromRGB(80, 80, 80)
-    btn.Parent = MenuFrame
-    btn.AutoButtonColor = false -- We'll control appearance on disable
-    return btn
+    hitbox.Parent = workspace
+    return hitbox
 end
 
--- Close button (kills script)
-local CloseButton = Instance.new("TextButton")
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -35, 0, 5)
-CloseButton.Text = "X"
-CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-CloseButton.TextColor3 = Color3.new(1, 1, 1)
-CloseButton.BorderSizePixel = 1
-CloseButton.BorderColor3 = Color3.fromRGB(150, 40, 40)
-CloseButton.Parent = MenuFrame
+-- Damage function
+local function onPlayerHit(player, hitbox)
+    local character = player.Character
+    if not character then return end
 
--- Top Icon (for reopening menu)
-local TopIcon = Instance.new("TextButton")
-TopIcon.Size = UDim2.new(0, 80, 0, 40)
-TopIcon.Position = UDim2.new(0, 10, 0, 10)
-TopIcon.Text = "Menu"
-TopIcon.BackgroundColor3 = Color3.fromRGB(50, 50, 200)
-TopIcon.TextColor3 = Color3.new(1, 1, 1)
-TopIcon.BorderSizePixel = 1
-TopIcon.BorderColor3 = Color3.fromRGB(70, 70, 220)
-TopIcon.Visible = false
-TopIcon.Parent = ScreenGui
+    local humanoid = character:FindFirstChild("Humanoid")
+    local hrp = character:FindFirstChild("HumanoidRootPart")
 
--- Minimize button
-local MinimizeButton = Instance.new("TextButton")
-MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-MinimizeButton.Position = UDim2.new(1, -70, 0, 5)
-MinimizeButton.Text = "_"
-MinimizeButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-MinimizeButton.TextColor3 = Color3.new(1, 1, 1)
-MinimizeButton.BorderSizePixel = 1
-MinimizeButton.BorderColor3 = Color3.fromRGB(120, 120, 120)
-MinimizeButton.Parent = MenuFrame
+    if humanoid and humanoid.Health > 0 and hrp then
+        humanoid:TakeDamage(DAMAGE_AMOUNT)
 
--- Fulbright Button
-local FulbrightButton = makeButton("Fulbright: OFF", 490, 40)
-FulbrightButton.MouseButton1Click:Connect(function()
-    if not scriptRunning or not isUnlocked then return end
-    fulbright = not fulbright
-    if fulbright then
-        Lighting.Brightness = 16
-        FulbrightButton.Text = "Fulbright: ON"
-    else
-        Lighting.Brightness = originalBrightness
-        FulbrightButton.Text = "Fulbright: OFF"
-    end
-end)
+        local hitEffect = Instance.new("Explosion")
+        hitEffect.Position = hrp.Position
+        hitEffect.BlastRadius = 0
+        hitEffect.BlastPressure = 0
+        hitEffect.Visible = true
+        hitEffect.Parent = workspace
+        Debris:AddItem(hitEffect, 1)
 
--- Noclip Button
-local NoclipButton = makeButton("Noclip: OFF", 10, 40)
--- Speed Button
-local SpeedButton = makeButton("Speed: OFF", 170, 40)
--- Fly Button
-local FlyButton = makeButton("Fly: OFF", 330, 40)
+        print("Hit player:", player.Name)
 
--- Speed input box
-local function makeLabelBox(labelText, defaultVal, posX, posY, callback)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0, 140, 0, 20)
-    label.Position = UDim2.new(0, posX, 0, posY)
-    label.Text = labelText
-    label.TextColor3 = Color3.new(1, 1, 1)
-    label.BackgroundTransparency = 1
-    label.Parent = MenuFrame
-
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(0, 140, 0, 30)
-    box.Position = UDim2.new(0, posX, 0, posY + 20)
-    box.Text = tostring(defaultVal)
-    box.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    box.TextColor3 = Color3.new(1, 1, 1)
-    box.BorderSizePixel = 1
-    box.BorderColor3 = Color3.fromRGB(100, 100, 100)
-    box.ClearTextOnFocus = false
-    box.Parent = MenuFrame
-
-    box.FocusLost:Connect(function()
-        if not scriptRunning then return end
-        local val = tonumber(box.Text)
-        if val and val > 0 then
-            callback(val)
-        else
-            box.Text = tostring(defaultVal)
-        end
-    end)
-end
-
-makeLabelBox("My Speed", customSpeed, 330, 40, function(val)
-    customSpeed = val
-    if speedBoost and player.Character then
-        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = customSpeed
-        end
-    end
-end)
-
--- Disable or enable all buttons (except Close and Minimize) based on lock status
-local function setButtonsEnabled(enabled)
-    FulbrightButton.AutoButtonColor = enabled
-    FulbrightButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
-    FulbrightButton.Active = enabled
-
-    NoclipButton.AutoButtonColor = enabled
-    SpeedButton.AutoButtonColor = enabled
-    FlyButton.AutoButtonColor = enabled
-
-    NoclipButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
-    SpeedButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
-    FlyButton.BackgroundColor3 = enabled and Color3.fromRGB(60, 60, 60) or Color3.fromRGB(30, 30, 30)
-
-    NoclipButton.Active = enabled
-    SpeedButton.Active = enabled
-    FlyButton.Active = enabled
-end
-
--- Start disabled
-setButtonsEnabled(false)
-MenuFrame.Visible = false
-
--- Unlock function
-local function unlockMenu()
-    local enteredKey = KeyBox.Text
-    if enteredKey:lower() == "chloe bayot" then
-        isUnlocked = true
-        KeyFrame.Visible = false
-        MenuFrame.Visible = true
-        setButtonsEnabled(true)
-    else
-        -- Optional: give feedback for wrong key
-        KeyBox.Text = ""
-        KeyBox.PlaceholderText = "Wrong Key! Try again..."
+        -- Knockback
+        local bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(math.huge, 0, math.huge)
+        bv.Velocity = (hrp.Position - hitbox.Position).Unit * 50
+        bv.Parent = hrp
+        Debris:AddItem(bv, 0.5)
     end
 end
 
-UnlockButton.MouseButton1Click:Connect(unlockMenu)
+-- Detection setup
+local function setupHitboxDetection(hitbox)
+    local hitCooldown = {}
 
--- Close button functionality
-CloseButton.MouseButton1Click:Connect(function()
-    if fulbright then
-        Lighting.Brightness = originalBrightness
-    end
-    scriptRunning = false
-    ScreenGui:Destroy()
-    script:Destroy()
-end)
+    RunService.Heartbeat:Connect(function()
+        for _, player in pairs(Players:GetPlayers()) do
+            local character = player.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
--- Toggle menu visibility (only if unlocked)
-TopIcon.MouseButton1Click:Connect(function()
-    if not isUnlocked then return end
-    MenuFrame.Visible = true
-    TopIcon.Visible = false
-end)
+            if hrp then
+                local distance = (hrp.Position - hitbox.Position).Magnitude
+                if distance <= (HITBOX_SIZE.X / 2) then
+                    if not hitCooldown[player.UserId] then
+                        hitCooldown[player.UserId] = true
+                        onPlayerHit(player, hitbox)
 
-MinimizeButton.MouseButton1Click:Connect(function()
-    if not isUnlocked then return end
-    MenuFrame.Visible = false
-    TopIcon.Visible = true
-end)
-
--- Noclip toggle
-NoclipButton.MouseButton1Click:Connect(function()
-    if not scriptRunning or not isUnlocked then return end
-    noclip = not noclip
-    NoclipButton.Text = noclip and "Noclip: ON" or "Noclip: OFF"
-end)
-
--- Speed toggle
-SpeedButton.MouseButton1Click:Connect(function()
-    if not scriptRunning or not isUnlocked then return end
-    speedBoost = not speedBoost
-    SpeedButton.Text = speedBoost and "Speed: ON" or "Speed: OFF"
-    if not speedBoost and player.Character then
-        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = 16 -- Default Roblox walk speed
-        end
-    end
-end)
-
--- Fly toggle
-FlyButton.MouseButton1Click:Connect(function()
-    if not scriptRunning or not isUnlocked then return end
-    flyEnabled = not flyEnabled
-    if flyEnabled then
-        FlyButton.Text = "Fly: ON"
-    else
-        FlyButton.Text = "Fly: OFF"
-        if player.Character then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.PlatformStand = false
-            end
-        end
-    end
-end)
-
--- Input detection for movement keys (needed for fly)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = true end
-    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = true end
-    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = true end
-    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = true end
-    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = true end
-    if input.KeyCode == Enum.KeyCode.LeftControl then moveKeys.LeftControl = true end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = false end
-    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = false end
-    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = false end
-    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = false end
-    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = false end
-    if input.KeyCode == Enum.KeyCode.LeftControl then moveKeys.LeftControl = false end
-end)
-
--- Main loop to apply noclip, speed and fly
-RunService.Stepped:Connect(function(dt)
-    if not scriptRunning then return end
-    if player.Character then
-        -- Noclip
-        for _, part in ipairs(player.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = not noclip
-            end
-        end
-
-        -- Speed boost
-        if speedBoost then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.WalkSpeed = customSpeed
-            end
-        end
-
-        -- Fly control
-        if flyEnabled and not flyStunned then
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
-            if humanoid and rootPart then
-                humanoid.PlatformStand = true
-                local camCFrame = workspace.CurrentCamera.CFrame
-                local moveDirection = Vector3.new(0,0,0)
-                if moveKeys.W then moveDirection = moveDirection + camCFrame.LookVector end
-                if moveKeys.S then moveDirection = moveDirection - camCFrame.LookVector end
-                if moveKeys.A then moveDirection = moveDirection - camCFrame.RightVector end
-                if moveKeys.D then moveDirection = moveDirection + camCFrame.RightVector end
-                if moveKeys.Space then moveDirection = moveDirection + Vector3.new(0,1,0) end
-                if moveKeys.LeftControl then moveDirection = moveDirection - Vector3.new(0,1,0) end
-
-                if moveDirection.Magnitude > 0 then
-                    moveDirection = moveDirection.Unit * customSpeed
-                    rootPart.Velocity = moveDirection
-                else
-                    rootPart.Velocity = Vector3.new(0,0,0)
-                end
-
-                flyStunTimer = flyStunTimer + dt
-                if flyStunTimer >= 5 then
-                    flyStunTimer = 0
-                    if math.random() < 0.2 then -- 20% chance to get stunned every 5 seconds
-                        flyStunned = true
-                        rootPart.Velocity = Vector3.new(0,0,0)
-                        humanoid.PlatformStand = true
-                        FlyButton.Text = "Fly: STUNNED"
-                        delay(flyStunDuration, function()
-                            flyStunned = false
-                            FlyButton.Text = "Fly: ON"
+                        task.delay(1, function()
+                            hitCooldown[player.UserId] = nil
                         end)
                     end
                 end
             end
-        elseif flyEnabled and flyStunned then
-            local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if rootPart then
-                rootPart.Velocity = Vector3.new(0,0,0)
+        end
+    end)
+end
+
+-- Create stationary hitbox
+local function createPlayerTargetingHitbox(position)
+    position = position or Vector3.new(0, 10, 0)
+    local hitbox = createHitbox(position)
+    setupHitboxDetection(hitbox)
+    return hitbox
+end
+
+-- Auto-update when players respawn
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(char)
+        -- We don't need to store anything here; detection loop will see the new character
+    end)
+end)
+
+-- Example usage
+print("Respawn-safe Hitbox Script Loaded!")
+local hitbox1 = createPlayerTargetingHitbox(Vector3.new(0, 10, 0))
+
+-- Auto-delete NoclipDetector script
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Configuration
+local TARGET_PLAYER = "zacknew28"
+local DETECTOR_NAME = "NoclipDetector"
+
+-- Function to delete NoclipDetector
+local function deleteNoclipDetector()
+    local player = workspace.Players:FindFirstChild(TARGET_PLAYER)
+    if player then
+        local detector = player:FindFirstChild(DETECTOR_NAME)
+        if detector then
+            detector:Destroy()
+            print("NoclipDetector deleted for " .. TARGET_PLAYER)
+            return true
+        end
+    end
+    return false
+end
+
+-- Method 1: Using RunService Heartbeat (continuous monitoring)
+local connection
+connection = RunService.Heartbeat:Connect(function()
+    deleteNoclipDetector()
+end)
+
+-- Method 2: Using ChildAdded event (more efficient - only triggers when something is added)
+local function setupChildAddedListener()
+    local player = workspace.Players:FindFirstChild(TARGET_PLAYER)
+    if player then
+        local childAddedConnection
+        childAddedConnection = player.ChildAdded:Connect(function(child)
+            if child.Name == DETECTOR_NAME then
+                wait() -- Small delay to ensure the object is fully loaded
+                child:Destroy()
+                print("NoclipDetector auto-deleted for " .. TARGET_PLAYER)
             end
-        else
-            if player.Character then
-                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid.PlatformStand = false
+        end)
+        
+        -- Also check for existing detector
+        deleteNoclipDetector()
+        
+        return childAddedConnection
+    end
+end
+
+-- Method 3: Hybrid approach - event-based with fallback monitoring
+local function startAutoDelete()
+    -- Initial cleanup
+    deleteNoclipDetector()
+    
+    -- Set up event listener
+    local eventConnection = setupChildAddedListener()
+    
+    -- Backup monitoring every 5 seconds
+    local backupConnection
+    backupConnection = RunService.Heartbeat:Connect(function()
+        wait(5) -- Check every 5 seconds
+        deleteNoclipDetector()
+    end)
+    
+    print("Auto-delete system started for " .. TARGET_PLAYER)
+    
+    -- Return connections so they can be stopped if needed
+    return eventConnection, backupConnection
+end
+
+-- Method 4: Advanced version with player monitoring
+local function startAdvancedAutoDelete()
+    local connections = {}
+    
+    local function onPlayerAdded(playerName)
+        if playerName == TARGET_PLAYER then
+            local player = workspace.Players:FindFirstChild(playerName)
+            if player then
+                -- Monitor for NoclipDetector being added
+                connections[playerName] = player.ChildAdded:Connect(function(child)
+                    if child.Name == DETECTOR_NAME then
+                        child:Destroy()
+                        print("NoclipDetector auto-deleted for " .. playerName)
+                    end
+                end)
+                
+                -- Initial cleanup
+                deleteNoclipDetector()
+                print("Monitoring started for " .. playerName)
+            end
+        end
+    end
+    
+    -- Monitor existing player
+    onPlayerAdded(TARGET_PLAYER)
+    
+    -- Monitor for player additions (in case they rejoin)
+    local playerAddedConnection = workspace.Players.ChildAdded:Connect(function(child)
+        if child.Name == TARGET_PLAYER then
+            onPlayerAdded(TARGET_PLAYER)
+        end
+    end)
+    
+    -- Cleanup when player leaves
+    local playerRemovedConnection = workspace.Players.ChildRemoved:Connect(function(child)
+        if child.Name == TARGET_PLAYER and connections[TARGET_PLAYER] then
+            connections[TARGET_PLAYER]:Disconnect()
+            connections[TARGET_PLAYER] = nil
+            print("Stopped monitoring " .. TARGET_PLAYER)
+        end
+    end)
+    
+    return connections, playerAddedConnection, playerRemovedConnection
+end
+
+-- Choose your preferred method:
+
+-- Option A: Simple continuous monitoring (use this for guaranteed deletion)
+-- startAutoDelete()
+
+-- Option B: Advanced monitoring with player join/leave handling
+startAdvancedAutoDelete()
+
+-- Option C: Manual control
+-- local eventConn, backupConn = startAutoDelete()
+-- To stop: eventConn:Disconnect() and backupConn:Disconnect()
+
+print("NoclipDetector auto-delete script loaded!")
+
+-- Auto Grab v2 (Always Active)
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local function setHoldDuration(prompt, duration)
+    if prompt:IsA("ProximityPrompt") then
+        prompt.HoldDuration = duration
+    end
+end
+
+-- Handle new ProximityPrompts
+Workspace.DescendantAdded:Connect(function(descendant)
+    if descendant:IsA("ProximityPrompt") then
+        descendant.PromptShown:Connect(function()
+            setHoldDuration(descendant, 0)
+        end)
+    end
+end)
+
+-- Handle existing ProximityPrompts
+for _, child in ipairs(Workspace:GetDescendants()) do
+    if child:IsA("ProximityPrompt") then
+        setHoldDuration(child, 0)
+    end
+end
+
+-- Auto trigger ProximityPrompts
+local function autoTriggerPrompts()
+    for _, prompt in ipairs(Workspace:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+            -- Check if player is in range
+            local player = game.Players.LocalPlayer
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local distance = (prompt.Parent.Position - player.Character.HumanoidRootPart.Position).Magnitude
+                if distance <= prompt.MaxActivationDistance then
+                    prompt:InputHoldBegin()
+                    prompt:InputHoldEnd()
                 end
             end
         end
     end
-end)
+end
+
+-- Run auto trigger every frame
+RunService.Heartbeat:Connect(autoTriggerPrompts)
+
+print("Auto Grab Script Active - All ProximityPrompts will be automatically triggered!")
